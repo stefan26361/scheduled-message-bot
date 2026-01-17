@@ -1,17 +1,18 @@
 import { ChatInputCommandInteraction, EmbedBuilder } from "discord.js";
 import { db } from "../database/db";
 
-interface Schedule {
+interface ScheduleRow {
   id: number;
   channel_id: string;
   message: string;
   scheduled_at: number;
+  user_id: string;
 }
 
 export async function scheduleCommand(interaction: ChatInputCommandInteraction) {
   const sub = interaction.options.getSubcommand();
 
-  // ---------- CREATE ----------
+  // CREATE
   if (sub === "create") {
     const channel = interaction.options.getChannel("channel", true);
     const datetime = interaction.options.getString("datetime", true);
@@ -23,8 +24,16 @@ export async function scheduleCommand(interaction: ChatInputCommandInteraction) 
     }
 
     db.run(
-      `INSERT INTO schedules (channel_id, message, scheduled_at) VALUES (?, ?, ?)`,
-      [channel.id, message, timestamp]
+      `INSERT INTO schedules (channel_id, message, scheduled_at, user_id)
+       VALUES (?, ?, ?, ?)`,
+      [channel.id, message, timestamp, interaction.user.id],
+      function () {
+        db.run(
+          `INSERT INTO logs (action, schedule_id, user_id, timestamp)
+           VALUES (?, ?, ?, ?)`,
+          ["create", this.lastID, interaction.user.id, Date.now()]
+        );
+      }
     );
 
     const embed = new EmbedBuilder()
@@ -35,50 +44,51 @@ export async function scheduleCommand(interaction: ChatInputCommandInteraction) 
         { name: "📍 Channel", value: `<#${channel.id}>`, inline: true },
         { name: "⏰ Zeitpunkt", value: `<t:${Math.floor(timestamp / 1000)}:F>`, inline: true }
       )
-      .setFooter({ text: "Scheduled Messages Bot" });
+      .setFooter({ text: "Scheduled Messages Bot" })
+      .setTimestamp();
 
     return interaction.reply({ embeds: [embed], ephemeral: true });
   }
 
-  // ---------- LIST ----------
+  // LIST
   if (sub === "list") {
     db.all(`SELECT * FROM schedules`, (err, rows) => {
-      if (err) {
-        console.error(err);
-        return interaction.reply({ content: "❌ Fehler beim Laden der Nachrichten", ephemeral: true });
-      }
+      const data = rows as ScheduleRow[];
 
-      const schedules = rows as Schedule[];
-      if (!schedules || schedules.length === 0) {
+      if (!data.length) {
         return interaction.reply({ content: "Keine geplanten Nachrichten.", ephemeral: true });
       }
 
-      const text = schedules
-        .map(r => `**#${r.id}** → <#${r.channel_id}> • <t:${Math.floor(r.scheduled_at / 1000)}:F>`)
+      const text = data
+        .map(r =>
+          `**#${r.id}** → <#${r.channel_id}> • <t:${Math.floor(r.scheduled_at / 1000)}:F>`
+        )
         .join("\n");
 
       interaction.reply({ content: text, ephemeral: true });
     });
   }
 
-  // ---------- CANCEL ----------
+  // CANCEL
   if (sub === "cancel") {
     const id = interaction.options.getInteger("id", true);
 
-    db.run(`DELETE FROM schedules WHERE id = ?`, [id], function(err) {
-      if (err) {
-        console.error(err);
-        return interaction.reply({ content: `❌ Konnte Nachricht #${id} nicht löschen`, ephemeral: true });
+    db.run(`DELETE FROM schedules WHERE id = ?`, [id], function () {
+      if (this.changes === 0) {
+        return interaction.reply({ content: "❌ ID nicht gefunden", ephemeral: true });
       }
 
-      if (this.changes === 0) {
-        return interaction.reply({ content: `❌ Nachricht #${id} nicht gefunden`, ephemeral: true });
-      }
+      db.run(
+        `INSERT INTO logs (action, schedule_id, user_id, timestamp)
+         VALUES (?, ?, ?, ?)`,
+        ["delete", id, interaction.user.id, Date.now()]
+      );
 
       interaction.reply({ content: `🗑️ Nachricht #${id} gelöscht`, ephemeral: true });
     });
   }
 }
+
 
 
 
