@@ -1,6 +1,9 @@
 import sqlite3 from "sqlite3";
 
-export const db = new sqlite3.Database("schedule.db");
+export const db = new sqlite3.Database("schedule.db", (err) => {
+  if (err) console.error("DB Error:", err.message);
+  else console.log("✅ SQLite DB verbunden");
+});
 
 db.run(`
 CREATE TABLE IF NOT EXISTS schedules (
@@ -19,6 +22,10 @@ CREATE TABLE IF NOT EXISTS logs (
   user_id TEXT,
   timestamp INTEGER NOT NULL
 )`);
+
+
+
+
 
 
 
